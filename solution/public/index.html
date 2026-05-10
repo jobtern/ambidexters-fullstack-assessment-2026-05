@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Ledger</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    header { background: #1a1a1a; color: #fff; padding: 1rem 2rem; }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    main { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+
+    .filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: flex-end; }
+    .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; font-weight: 500; }
+    .filters input, .filters select { padding: 0.4rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem; }
+    .filters button { padding: 0.4rem 1rem; background: #1a1a1a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
+    .filters button:hover { background: #333; }
+
+    .summary-card { background: #fff; border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; border: 1px solid #e0e0e0; }
+    .summary-card h2 { font-size: 1rem; margin-bottom: 1rem; color: #555; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; }
+    .summary-stat { text-align: center; }
+    .summary-stat .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+    .summary-stat .value { font-size: 1.4rem; font-weight: 700; margin-top: 4px; }
+    .summary-stat .value.settled { color: #16a34a; }
+    .summary-stat .value.pending { color: #d97706; }
+    .summary-stat .value.failed { color: #dc2626; }
+    .summary-stat .value.total { color: #1a1a1a; }
+
+    table { width: 100%; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0; border-collapse: collapse; overflow: hidden; }
+    th, td { padding: 0.75rem 1rem; text-align: left; font-size: 0.875rem; border-bottom: 1px solid #f0f0f0; }
+    th { background: #fafafa; font-weight: 600; color: #555; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+    .badge.pending { background: #fef3c7; color: #92400e; }
+    .badge.settled { background: #dcfce7; color: #166534; }
+    .badge.failed { background: #fee2e2; color: #991b1b; }
+
+    .amount { font-variant-numeric: tabular-nums; }
+    .mono { font-family: monospace; font-size: 0.8rem; color: #666; }
+    .empty { text-align: center; padding: 3rem; color: #999; }
+    .pagination { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; align-items: center; font-size: 0.875rem; }
+    .pagination button { padding: 0.3rem 0.7rem; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
+    .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .pagination button:hover:not(:disabled) { background: #f0f0f0; }
+    .page-info { color: #666; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Payment Ledger</h1>
+  </header>
+  <main>
+    <div class="filters">
+      <label>
+        Merchant ID
+        <input type="text" id="filter-merchant" placeholder="e.g. merchant_alpha" />
+      </label>
+      <label>
+        Status
+        <select id="filter-status">
+          <option value="">All</option>
+          <option value="pending">Pending</option>
+          <option value="settled">Settled</option>
+          <option value="failed">Failed</option>
+        </select>
+      </label>
+      <button onclick="applyFilters()">Apply</button>
+      <button onclick="clearFilters()" style="background:#666">Clear</button>
+    </div>
+
+    <div id="summary-section" style="display:none"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Merchant</th>
+          <th>Amount</th>
+          <th>Currency</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Settled</th>
+        </tr>
+      </thead>
+      <tbody id="payments-body">
+        <tr><td colspan="7" class="empty">Loading...</td></tr>
+      </tbody>
+    </table>
+
+    <div class="pagination">
+      <button id="prev-btn" onclick="changePage(-1)" disabled>&#8592; Prev</button>
+      <span class="page-info" id="page-info"></span>
+      <button id="next-btn" onclick="changePage(1)" disabled>Next &#8594;</button>
+    </div>
+  </main>
+
+  <script>
+    let currentPage = 1;
+    let currentFilters = { merchant_id: '', status: '' };
+    let totalPages = 1;
+
+    function formatAmount(kobo) {
+      return (kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    async function loadPayments() {
+      const params = new URLSearchParams({ page: currentPage, limit: 20 });
+      if (currentFilters.merchant_id) params.set('merchant_id', currentFilters.merchant_id);
+      if (currentFilters.status) params.set('status', currentFilters.status);
+
+      const res = await fetch('/api/payments?' + params);
+      const json = await res.json();
+      const { data, pagination } = json;
+
+      totalPages = pagination.pages;
+      document.getElementById('page-info').textContent =
+        `Page ${pagination.page} of ${pagination.pages || 1} (${pagination.total} records)`;
+      document.getElementById('prev-btn').disabled = currentPage <= 1;
+      document.getElementById('next-btn').disabled = currentPage >= totalPages;
+
+      const tbody = document.getElementById('payments-body');
+      if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No payments found.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td class="mono">${escHtml(p.reference)}</td>
+          <td>${escHtml(p.merchant_id)}</td>
+          <td class="amount">${formatAmount(p.amount)}</td>
+          <td>${escHtml(p.currency)}</td>
+          <td><span class="badge ${p.status}">${p.status}</span></td>
+          <td>${formatDate(p.created_at)}</td>
+          <td>${formatDate(p.settled_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadSummary(merchantId) {
+      const section = document.getElementById('summary-section');
+      if (!merchantId) { section.style.display = 'none'; return; }
+
+      const res = await fetch('/api/merchants/' + encodeURIComponent(merchantId) + '/summary');
+      if (!res.ok) { section.style.display = 'none'; return; }
+      const s = await res.json();
+
+      section.style.display = 'block';
+      section.innerHTML = `
+        <div class="summary-card">
+          <h2>Summary for <strong>${escHtml(s.merchant_id)}</strong></h2>
+          <div class="summary-grid">
+            <div class="summary-stat">
+              <div class="label">Total (Settled + Pending)</div>
+              <div class="value total">${s.breakdown.settled.amount || s.breakdown.pending.amount ? formatAmount(s.total_amount) : '0.00'} NGN</div>
+            </div>
+            <div class="summary-stat">
+              <div class="label">Settled</div>
+              <div class="value settled">${formatAmount(s.breakdown.settled.amount)} NGN</div>
+              <div style="font-size:0.75rem;color:#888">${s.breakdown.settled.count} txn(s)</div>
+            </div>
+            <div class="summary-stat">
+              <div class="label">Pending</div>
+              <div class="value pending">${formatAmount(s.breakdown.pending.amount)} NGN</div>
+              <div style="font-size:0.75rem;color:#888">${s.breakdown.pending.count} txn(s)</div>
+            </div>
+            <div class="summary-stat">
+              <div class="label">Failed</div>
+              <div class="value failed">${formatAmount(s.breakdown.failed.amount)} NGN</div>
+              <div style="font-size:0.75rem;color:#888">${s.breakdown.failed.count} txn(s)</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function applyFilters() {
+      currentFilters.merchant_id = document.getElementById('filter-merchant').value.trim();
+      currentFilters.status = document.getElementById('filter-status').value;
+      currentPage = 1;
+      loadPayments();
+      loadSummary(currentFilters.merchant_id);
+    }
+
+    function clearFilters() {
+      document.getElementById('filter-merchant').value = '';
+      document.getElementById('filter-status').value = '';
+      currentFilters = { merchant_id: '', status: '' };
+      currentPage = 1;
+      document.getElementById('summary-section').style.display = 'none';
+      loadPayments();
+    }
+
+    function changePage(delta) {
+      currentPage = Math.max(1, Math.min(totalPages, currentPage + delta));
+      loadPayments();
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    loadPayments();
+  </script>
+</body>
+</html>
