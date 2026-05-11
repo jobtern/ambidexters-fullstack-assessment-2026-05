@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ -n "$CODESPACES" ]; then
+  COMMIT_MSG_FILE=$1
+  COMMIT_SOURCE=$2
+  
+  COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+  
+  if [[ "$COMMIT_SOURCE" != "merge" ]] && [[ "$COMMIT_SOURCE" != "squash" ]] && [[ "$COMMIT_MSG" != *"[codespaces]"* ]]; then
+    echo "[codespaces] $COMMIT_MSG" > "$COMMIT_MSG_FILE"
+  fi
+fi
