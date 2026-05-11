@@ -1,8 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import db from "./db";
 
-const merchants = ["merchant_alpha", "merchant_beta", "merchant_gamma"];
-
 const payments = [
   {
     merchant_id: "merchant_alpha",
@@ -122,4 +120,3 @@ const insertMany = db.transaction(() => {
 
 const inserted = insertMany();
 console.log(`Seed complete. Inserted ${inserted} payment(s).`);
-console.log(`Merchants: ${merchants.join(", ")}`);

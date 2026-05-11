@@ -26,7 +26,6 @@ function serializePayment(row: PaymentRow) {
   };
 }
 
-// POST /api/payments
 router.post("/", (req: Request, res: Response) => {
   const { merchant_id, amount, currency, status, reference, settled_at, metadata } = req.body;
 
@@ -98,7 +97,6 @@ router.post("/", (req: Request, res: Response) => {
   return res.status(201).json(serializePayment(row));
 });
 
-// GET /api/payments
 router.get("/", (req: Request, res: Response) => {
   const { status, merchant_id, page, limit } = req.query;
 
@@ -147,7 +145,6 @@ router.get("/", (req: Request, res: Response) => {
   });
 });
 
-// GET /api/payments/:id
 router.get("/:id", (req: Request, res: Response) => {
   const row = db.prepare("SELECT * FROM payments WHERE id = ?").get(req.params.id) as
     | PaymentRow

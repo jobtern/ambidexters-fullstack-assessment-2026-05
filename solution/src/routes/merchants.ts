@@ -9,7 +9,6 @@ interface SummaryRow {
   total: number;
 }
 
-// GET /api/merchants/:merchant_id/summary
 router.get("/:merchant_id/summary", (req: Request, res: Response) => {
   const { merchant_id } = req.params;
 
